@@ -1,0 +1,11 @@
+[Unit]
+Description=NuitPC - programme le démarrage automatique à chaque extinction
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/bin/true
+ExecStop=/usr/local/bin/nuitpc-job set-wake
+
+[Install]
+WantedBy=multi-user.target

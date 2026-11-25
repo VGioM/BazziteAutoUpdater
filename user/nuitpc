@@ -6,6 +6,7 @@ import re
 import subprocess
 import sys
 import threading
+import time
 
 HELPER = "/usr/local/bin/nuitpc-helper"
 CONF = "/etc/nuitpc/nuitpc.conf"
@@ -15,6 +16,9 @@ SETTINGS = os.path.join(os.environ.get("XDG_CONFIG_HOME", os.path.expanduser("~/
                         "nuitpc", "settings.json")
 
 JOBS = {
+    "boot": ("Démarrage automatique",
+             "Allume le PC à cette heure s'il est éteint (programmé à chaque "
+             "extinction depuis Linux, pas depuis Windows).", 23),
     "update": ("Mise à jour puis redémarrage",
                "Firmware (selon l'option ci-dessous), brew, ujust update, puis "
                "redémarrage. Sort le PC de veille si besoin.", 0),
@@ -81,7 +85,10 @@ def read_conf(key, default=""):
 
 
 def read_timer(job):
-    """Retourne (heure, minute) si le minuteur existe, sinon None."""
+    """Retourne (heure, minute) si la tâche est programmée, sinon None."""
+    if job == "boot":
+        m = re.fullmatch(r"(\d{2}):(\d{2})", read_conf("BOOT_TIME"))
+        return (int(m.group(1)), int(m.group(2))) if m else None
     try:
         with open(f"/etc/systemd/system/nuitpc-{job}.timer") as f:
             m = re.search(r"OnCalendar=\S+ (\d{2}):(\d{2})", f.read())
@@ -91,6 +98,13 @@ def read_timer(job):
 
 
 def next_run(job):
+    if job == "boot":
+        h, m = read_timer(job)
+        now = time.localtime()
+        t = time.mktime((now.tm_year, now.tm_mon, now.tm_mday, h, m, 0, 0, 0, -1))
+        if t <= time.time() + 60:
+            t += 86400
+        return time.strftime("%a %d/%m %H:%M", time.localtime(t)) + " (si le PC est éteint)"
     out = subprocess.run(
         ["systemctl", "show", f"nuitpc-{job}.timer", "-p", "NextElapseUSecRealtime", "--value"],
         capture_output=True, text=True).stdout.strip()
@@ -134,8 +148,14 @@ class JobRow:
         self.next_row.add_css_class("property")
         self.row.add_row(self.next_row)
 
-        run_row = Adw.ActionRow(title="Lancer maintenant")
-        run_btn = Gtk.Button(label="Lancer", valign=Gtk.Align.CENTER)
+        if job == "boot":
+            run_row = Adw.ActionRow(
+                title="Tester",
+                subtitle="Éteint le PC maintenant ; il doit se rallumer seul dans 3 minutes.")
+            run_btn = Gtk.Button(label="Tester", valign=Gtk.Align.CENTER)
+        else:
+            run_row = Adw.ActionRow(title="Lancer maintenant")
+            run_btn = Gtk.Button(label="Lancer", valign=Gtk.Align.CENTER)
         run_btn.connect("clicked", self._run_now)
         run_row.add_suffix(run_btn)
         self.row.add_row(run_row)
@@ -157,7 +177,20 @@ class JobRow:
         nxt = next_run(self.job) if read_timer(self.job) else None
         self.next_row.set_subtitle(nxt or "—")
 
-    def _run_now(self, _btn):
+    def _run_now(self, btn):
+        if self.job == "boot":
+            dlg = Adw.AlertDialog(
+                heading="Tester le démarrage automatique ?",
+                body="Le PC va s'éteindre tout de suite (enregistre ton travail) et "
+                     "devrait se rallumer tout seul environ 3 minutes plus tard.\n\n"
+                     "S'il ne se rallume pas, désactive « ErP Ready » dans le BIOS "
+                     "(Advanced → APM Configuration).")
+            dlg.add_response("cancel", "Annuler")
+            dlg.add_response("go", "Éteindre et tester")
+            dlg.set_response_appearance("go", Adw.ResponseAppearance.DESTRUCTIVE)
+            dlg.connect("response", lambda _d, r: r == "go" and helper("test-wake"))
+            dlg.present(btn.get_root())
+            return
         ok, msg = helper("run", self.job)
         self.app.toast("Tâche lancée" if ok else f"Échec : {msg}")
 

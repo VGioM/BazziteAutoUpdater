@@ -5,6 +5,8 @@
 #   nuitpc-helper run update|poweroff     (lancer maintenant)
 #   nuitpc-helper firmware-auto yes|no    (installer les firmwares la nuit)
 #   nuitpc-helper check-firmware          (revérifier les firmwares disponibles)
+#   nuitpc-helper set boot HH:MM|off      (démarrage automatique)
+#   nuitpc-helper test-wake               (éteindre et rallumer dans 3 min)
 set -eu
 
 CONF=/etc/nuitpc/nuitpc.conf
@@ -21,6 +23,20 @@ firmware-auto)
     exit 0 ;;
 check-firmware)
     exec /usr/local/bin/nuitpc-job check-firmware ;;
+test-wake)
+    exec /usr/local/bin/nuitpc-job test-wake ;;
+set)
+    if [ "${2:-}" = "boot" ]; then
+        value=${3:-}
+        [[ "$value" == "off" || "$value" =~ ^([01][0-9]|2[0-3]):[0-5][0-9]$ ]] || die "heure invalide"
+        [ "$value" = "off" ] && value=""
+        if grep -q '^BOOT_TIME=' "$CONF"; then
+            sed -i "s/^BOOT_TIME=.*/BOOT_TIME=$value/" "$CONF"
+        else
+            echo "BOOT_TIME=$value" >> "$CONF"
+        fi
+        exit 0
+    fi ;;
 esac
 
 job=${2:-}

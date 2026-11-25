@@ -2,6 +2,7 @@
 # Désinstalle NuitPC.
 set -u
 sudo systemctl disable --now nuitpc-update.timer nuitpc-poweroff.timer 2>/dev/null
+sudo systemctl disable nuitpc-wake.service 2>/dev/null
 sudo rm -f /etc/systemd/system/nuitpc-* /usr/local/bin/nuitpc-job /usr/local/bin/nuitpc-helper \
     /etc/polkit-1/rules.d/49-nuitpc.rules
 sudo rm -rf /etc/nuitpc /var/lib/nuitpc

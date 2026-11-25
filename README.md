@@ -2,11 +2,12 @@
 
 Petite application pour **Bazzite** (et autres systèmes Universal Blue / Fedora Atomic) qui programme, chaque nuit :
 
+0. **le démarrage automatique** du PC s'il est éteint (optionnel) ;
 1. **les mises à jour** — firmware (optionnel), Homebrew, puis `ujust update` (système, Flatpak, distrobox…) ;
 2. **un redémarrage** une fois les mises à jour terminées, pour les appliquer ;
 3. **l'extinction du PC** à l'heure de ton choix.
 
-Exemple : mises à jour à 00h00 → redémarrage → le PC tourne (Steam peut recompiler ses shaders, etc.) → extinction à 02h00.
+Exemple : démarrage à 23h50 → mises à jour à 00h00 → redémarrage → le PC tourne (Steam peut recompiler ses shaders, etc.) → extinction à 02h00.
 
 ## Fonctionnalités
 
@@ -14,6 +15,9 @@ Exemple : mises à jour à 00h00 → redémarrage → le PC tourne (Steam peut r
 - Heures réglables pour la mise à jour et pour l'extinction, chacune activable séparément.
 - **Notification 5 minutes avant** chaque redémarrage ou extinction, avec les boutons « Annuler » et « Maintenant ».
 - Si l'heure d'extinction arrive pendant une mise à jour, le PC s'éteint à la fin de celle-ci au lieu de redémarrer.
+- **Démarrage automatique** : à chaque extinction depuis Linux, NuitPC programme l'horloge de la carte mère (réveil RTC, via `rtcwake`) pour rallumer le PC à l'heure choisie. Un bouton **Tester** éteint le PC et le rallume 3 minutes plus tard.
+  - Si le PC ne se rallume pas, désactive **ErP Ready** dans le BIOS (sur ASUS : *Advanced → APM Configuration*).
+  - Ne fonctionne pas si le PC est débranché, ni après une extinction depuis Windows (double démarrage).
 - Le PC est **sorti de veille** pour la mise à jour si besoin (`WakeSystem`).
 - **Firmware (BIOS, SSD…) :** NuitPC vérifie chaque nuit s'il existe des mises à jour (via `fwupd`).
   - Option désactivée (par défaut) : rien n'est installé, tu es prévenu par une notification, au démarrage de session et dans l'application. Tu installes toi-même avec le bouton **Installer…** de l'application (ouvre un terminal où `fwupdmgr update` demande confirmation) ou directement avec `fwupdmgr update`.
@@ -50,11 +54,12 @@ Après une mise à jour du pilote graphique, Steam recompile les shaders de tous
 
 | Fichier installé | Rôle |
 |---|---|
-| `/usr/local/bin/nuitpc-job` | Exécute les tâches (root) : `update`, `poweroff`, `check-firmware` |
+| `/usr/local/bin/nuitpc-job` | Exécute les tâches (root) : `update`, `poweroff`, `check-firmware`, `set-wake`, `test-wake` |
 | `/usr/local/bin/nuitpc-helper` | Appelé par l'interface via `pkexec` : écrit les minuteurs et les réglages |
 | `/etc/systemd/system/nuitpc-{update,poweroff}.{service,timer}` | Services et minuteurs systemd |
 | `/etc/polkit-1/rules.d/49-nuitpc.rules` | Autorise le groupe `wheel` à lancer `nuitpc-helper` sans mot de passe |
-| `/etc/nuitpc/nuitpc.conf` | Réglages (`NUITPC_USER`, `FIRMWARE_UPDATE`) |
+| `/etc/systemd/system/nuitpc-wake.service` | Programme le démarrage automatique à chaque extinction |
+| `/etc/nuitpc/nuitpc.conf` | Réglages (`NUITPC_USER`, `FIRMWARE_UPDATE`, `BOOT_TIME`) |
 | `/var/lib/nuitpc/firmware-disponible.txt` | Dernière liste des firmwares disponibles |
 | `/var/log/nuitpc.log` | Journal |
 | `~/.local/bin/nuitpc` | L'interface |
