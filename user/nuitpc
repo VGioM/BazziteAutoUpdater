@@ -1,0 +1,287 @@
+#!/usr/bin/python3
+"""NuitPC — programme la mise à jour + redémarrage et l'extinction du PC (Bazzite)."""
+import json
+import os
+import re
+import subprocess
+import sys
+import threading
+
+HELPER = "/usr/local/bin/nuitpc-helper"
+CONF = "/etc/nuitpc/nuitpc.conf"
+LOG = "/var/log/nuitpc.log"
+FW_STATUS = "/var/lib/nuitpc/firmware-disponible.txt"
+SETTINGS = os.path.join(os.environ.get("XDG_CONFIG_HOME", os.path.expanduser("~/.config")),
+                        "nuitpc", "settings.json")
+
+JOBS = {
+    "update": ("Mise à jour puis redémarrage",
+               "Firmware (selon l'option ci-dessous), brew, ujust update, puis "
+               "redémarrage. Sort le PC de veille si besoin.", 0),
+    "poweroff": ("Extinction du PC",
+                 "Éteint le PC (attend la fin d'une mise à jour en cours).", 2),
+}
+THEMES = ["Système", "Clair", "Sombre"]
+
+
+def read_firmware_status():
+    try:
+        with open(FW_STATUS) as f:
+            return [line for line in f.read().splitlines() if line.strip()]
+    except OSError:
+        return None  # jamais vérifié
+
+
+def notify_mode():
+    """Appelé au démarrage de session : signale un firmware disponible."""
+    fw = read_firmware_status()
+    if fw:
+        subprocess.run(["notify-send", "-a", "NuitPC", "-i", "software-update-available",
+                        "Mise à jour de firmware disponible",
+                        "\n".join(fw) + "\nInstalle-la toi-même avec : fwupdmgr update"])
+    sys.exit(0)
+
+
+if "--notify" in sys.argv:
+    notify_mode()
+
+import gi  # noqa: E402
+
+gi.require_version("Gtk", "4.0")
+gi.require_version("Adw", "1")
+from gi.repository import Adw, GLib, Gtk  # noqa: E402
+
+
+def load_settings():
+    try:
+        with open(SETTINGS) as f:
+            return json.load(f)
+    except (OSError, ValueError):
+        return {}
+
+
+def save_settings(data):
+    os.makedirs(os.path.dirname(SETTINGS), exist_ok=True)
+    with open(SETTINGS, "w") as f:
+        json.dump(data, f)
+
+
+def apply_theme(index):
+    schemes = [Adw.ColorScheme.DEFAULT, Adw.ColorScheme.FORCE_LIGHT, Adw.ColorScheme.FORCE_DARK]
+    Adw.StyleManager.get_default().set_color_scheme(schemes[index])
+
+
+def read_conf(key, default=""):
+    try:
+        with open(CONF) as f:
+            m = re.search(rf"^{key}=(\S*)", f.read(), re.M)
+            return m.group(1) if m else default
+    except OSError:
+        return default
+
+
+def read_timer(job):
+    """Retourne (heure, minute) si le minuteur existe, sinon None."""
+    try:
+        with open(f"/etc/systemd/system/nuitpc-{job}.timer") as f:
+            m = re.search(r"OnCalendar=\S+ (\d{2}):(\d{2})", f.read())
+            return (int(m.group(1)), int(m.group(2))) if m else None
+    except OSError:
+        return None
+
+
+def next_run(job):
+    out = subprocess.run(
+        ["systemctl", "show", f"nuitpc-{job}.timer", "-p", "NextElapseUSecRealtime", "--value"],
+        capture_output=True, text=True).stdout.strip()
+    return out or None
+
+
+def helper(*args):
+    r = subprocess.run(["pkexec", HELPER, *args], capture_output=True, text=True)
+    return r.returncode == 0, (r.stderr or r.stdout).strip()
+
+
+class JobRow:
+    def __init__(self, app, job, group):
+        self.app = app
+        self.job = job
+        title, subtitle, default_h = JOBS[job]
+        current = read_timer(job)
+
+        self.row = Adw.ExpanderRow(title=title, subtitle=subtitle)
+        self.row.set_show_enable_switch(True)
+        self.row.set_enable_expansion(current is not None)
+        self.row.set_expanded(current is not None)
+
+        h, m = current or (default_h, 0)
+        time_row = Adw.ActionRow(title="Heure (tous les jours)")
+        box = Gtk.Box(spacing=4, valign=Gtk.Align.CENTER)
+        self.hour = Gtk.SpinButton.new_with_range(0, 23, 1)
+        self.minute = Gtk.SpinButton.new_with_range(0, 59, 5)
+        for sb, val in ((self.hour, h), (self.minute, m)):
+            sb.set_value(val)
+            sb.set_wrap(True)
+            sb.set_orientation(Gtk.Orientation.VERTICAL)
+            sb.connect("output", self._pad)
+        box.append(self.hour)
+        box.append(Gtk.Label(label=":"))
+        box.append(self.minute)
+        time_row.add_suffix(box)
+        self.row.add_row(time_row)
+
+        self.next_row = Adw.ActionRow(title="Prochaine exécution")
+        self.next_row.add_css_class("property")
+        self.row.add_row(self.next_row)
+
+        run_row = Adw.ActionRow(title="Lancer maintenant")
+        run_btn = Gtk.Button(label="Lancer", valign=Gtk.Align.CENTER)
+        run_btn.connect("clicked", self._run_now)
+        run_row.add_suffix(run_btn)
+        self.row.add_row(run_row)
+
+        group.add(self.row)
+        self.refresh()
+
+    @staticmethod
+    def _pad(sb):
+        sb.set_text(f"{int(sb.get_value()):02d}")
+        return True
+
+    def value(self):
+        if not self.row.get_enable_expansion():
+            return "off"
+        return f"{int(self.hour.get_value()):02d}:{int(self.minute.get_value()):02d}"
+
+    def refresh(self):
+        nxt = next_run(self.job) if read_timer(self.job) else None
+        self.next_row.set_subtitle(nxt or "—")
+
+    def _run_now(self, _btn):
+        ok, msg = helper("run", self.job)
+        self.app.toast("Tâche lancée" if ok else f"Échec : {msg}")
+
+
+class App(Adw.Application):
+    def __init__(self):
+        super().__init__(application_id="local.nuitpc")
+        self.settings = load_settings()
+
+    def do_startup(self):
+        Adw.Application.do_startup(self)
+        apply_theme(self.settings.get("theme", 0))
+
+    def do_activate(self):
+        win = Adw.ApplicationWindow(application=self, title="NuitPC",
+                                    default_width=480, default_height=680)
+        self.toasts = Adw.ToastOverlay()
+        tv = Adw.ToolbarView()
+        tv.add_top_bar(Adw.HeaderBar())
+        page = Adw.PreferencesPage()
+
+        # --- Tâches programmées
+        jobs = Adw.PreferencesGroup(
+            title="Tâches programmées",
+            description="Une notification avec « Annuler » s'affiche 5 minutes "
+                        "avant chaque redémarrage ou extinction.")
+        page.add(jobs)
+        self.rows = [JobRow(self, j, jobs) for j in JOBS]
+
+        # --- Firmware
+        fw = Adw.PreferencesGroup(
+            title="Firmware (BIOS, SSD, périphériques…)",
+            description="Une coupure de courant pendant une mise à jour du BIOS peut "
+                        "l'endommager, et une mise à jour du BIOS remet souvent ses "
+                        "réglages par défaut (XMP/EXPO, ordre de démarrage…).")
+        page.add(fw)
+        self.fw_auto = Adw.SwitchRow(
+            title="Installer automatiquement la nuit",
+            subtitle="Désactivé : NuitPC vérifie seulement et te prévient.")
+        self.fw_auto.set_active(read_conf("FIRMWARE_UPDATE", "no") == "yes")
+        fw.add(self.fw_auto)
+
+        self.fw_row = Adw.ActionRow(title="Mises à jour disponibles")
+        self.fw_row.set_subtitle_lines(0)
+        self.fw_btn = Gtk.Button(label="Vérifier", valign=Gtk.Align.CENTER)
+        self.fw_btn.connect("clicked", self.check_firmware)
+        self.fw_row.add_suffix(self.fw_btn)
+        fw.add(self.fw_row)
+        self.show_firmware()
+
+        # --- Apparence
+        look = Adw.PreferencesGroup(title="Apparence")
+        page.add(look)
+        theme = Adw.ComboRow(title="Thème", model=Gtk.StringList.new(THEMES))
+        theme.set_selected(self.settings.get("theme", 0))
+        theme.connect("notify::selected", self.on_theme)
+        look.add(theme)
+
+        # --- Boutons
+        btns = Adw.PreferencesGroup()
+        apply_btn = Gtk.Button(label="Appliquer", halign=Gtk.Align.CENTER)
+        apply_btn.add_css_class("suggested-action")
+        apply_btn.add_css_class("pill")
+        apply_btn.connect("clicked", self.apply)
+        log_btn = Gtk.Button(label="Voir le journal", halign=Gtk.Align.CENTER)
+        log_btn.add_css_class("flat")
+        log_btn.connect("clicked", lambda *_: subprocess.Popen(["xdg-open", LOG]))
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
+        box.append(apply_btn)
+        box.append(log_btn)
+        btns.add(box)
+        page.add(btns)
+
+        tv.set_content(page)
+        self.toasts.set_child(tv)
+        win.set_content(self.toasts)
+        win.present()
+
+    def toast(self, text):
+        self.toasts.add_toast(Adw.Toast(title=text))
+
+    def on_theme(self, row, _pspec):
+        self.settings["theme"] = row.get_selected()
+        save_settings(self.settings)
+        apply_theme(self.settings["theme"])
+
+    def show_firmware(self):
+        fw = read_firmware_status()
+        if fw is None:
+            self.fw_row.set_subtitle("Pas encore vérifié")
+        elif not fw:
+            self.fw_row.set_subtitle("Aucune — tout est à jour")
+        else:
+            self.fw_row.set_subtitle("\n".join(fw) + "\nPour installer : fwupdmgr update")
+
+    def check_firmware(self, _btn):
+        self.fw_btn.set_sensitive(False)
+        self.fw_row.set_subtitle("Vérification en cours…")
+
+        def work():
+            ok, msg = helper("check-firmware")
+            GLib.idle_add(done, ok, msg)
+
+        def done(ok, msg):
+            self.fw_btn.set_sensitive(True)
+            self.show_firmware()
+            if not ok:
+                self.toast(f"Échec : {msg}")
+
+        threading.Thread(target=work, daemon=True).start()
+
+    def apply(self, _btn):
+        errors = []
+        for r in self.rows:
+            ok, msg = helper("set", r.job, r.value())
+            if not ok:
+                errors.append(msg or r.job)
+            r.refresh()
+        ok, msg = helper("firmware-auto", "yes" if self.fw_auto.get_active() else "no")
+        if not ok:
+            errors.append(msg or "firmware")
+        self.toast("Réglages enregistrés" if not errors else "Échec : " + "; ".join(errors))
+
+
+if not os.path.exists(HELPER):
+    sys.exit("NuitPC n'est pas installé (lance install.sh).")
+App().run([sys.argv[0]])

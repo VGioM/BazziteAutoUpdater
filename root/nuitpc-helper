@@ -1,0 +1,65 @@
+#!/usr/bin/bash
+# NuitPC — assistant privilégié appelé par l'interface via pkexec.
+#   nuitpc-helper set update   HH:MM|off
+#   nuitpc-helper set poweroff HH:MM|off
+#   nuitpc-helper run update|poweroff     (lancer maintenant)
+#   nuitpc-helper firmware-auto yes|no    (installer les firmwares la nuit)
+#   nuitpc-helper check-firmware          (revérifier les firmwares disponibles)
+set -eu
+
+CONF=/etc/nuitpc/nuitpc.conf
+die() { echo "nuitpc-helper: $*" >&2; exit 2; }
+
+case "${1:-}" in
+firmware-auto)
+    [[ "${2:-}" == "yes" || "${2:-}" == "no" ]] || die "valeur invalide"
+    if grep -q '^FIRMWARE_UPDATE=' "$CONF"; then
+        sed -i "s/^FIRMWARE_UPDATE=.*/FIRMWARE_UPDATE=$2/" "$CONF"
+    else
+        echo "FIRMWARE_UPDATE=$2" >> "$CONF"
+    fi
+    exit 0 ;;
+check-firmware)
+    exec /usr/local/bin/nuitpc-job check-firmware ;;
+esac
+
+job=${2:-}
+[[ "$job" == "update" || "$job" == "poweroff" ]] || die "tâche invalide"
+timer="/etc/systemd/system/nuitpc-$job.timer"
+
+case "${1:-}" in
+set)
+    value=${3:-}
+    if [ "$value" = "off" ]; then
+        systemctl disable --now "nuitpc-$job.timer" 2>/dev/null || true
+        rm -f "$timer"
+        systemctl daemon-reload
+        exit 0
+    fi
+    [[ "$value" =~ ^([01][0-9]|2[0-3]):[0-5][0-9]$ ]] || die "heure invalide"
+    wake=false
+    [ "$job" = "update" ] && wake=true
+    cat > "$timer" <<EOF
+[Unit]
+Description=NuitPC - $job programmé à $value
+
+[Timer]
+OnCalendar=*-*-* $value:00
+AccuracySec=1s
+WakeSystem=$wake
+Persistent=false
+
+[Install]
+WantedBy=timers.target
+EOF
+    systemctl daemon-reload
+    systemctl enable "nuitpc-$job.timer" >/dev/null 2>&1
+    systemctl restart "nuitpc-$job.timer"
+    ;;
+run)
+    systemctl start --no-block "nuitpc-$job.service"
+    ;;
+*)
+    die "commande invalide"
+    ;;
+esac

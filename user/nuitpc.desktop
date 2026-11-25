@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=NuitPC
+Comment=Mise à jour, redémarrage et extinction programmés
+Exec=python3 %h/.local/bin/nuitpc
+Icon=preferences-system-time
+Categories=System;Settings;
+Terminal=false

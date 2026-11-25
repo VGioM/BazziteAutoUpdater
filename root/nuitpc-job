@@ -1,0 +1,115 @@
+#!/usr/bin/bash
+# NuitPC — tâches nocturnes (exécuté en root par systemd)
+#   nuitpc-job update    : mises à jour (firmware, brew, uupd) puis redémarrage
+#   nuitpc-job poweroff  : extinction
+#   nuitpc-job check-firmware : liste les mises à jour de firmware disponibles
+set -u
+
+CONF=/etc/nuitpc/nuitpc.conf
+LOG=/var/log/nuitpc.log
+PENDING_POWEROFF=/run/nuitpc-poweroff-pending
+FW_STATUS=/var/lib/nuitpc/firmware-disponible.txt
+WARN_SECONDS=300
+FIRMWARE_UPDATE=no
+
+# shellcheck source=/dev/null
+[ -r "$CONF" ] && . "$CONF"
+: "${NUITPC_USER:?NUITPC_USER manquant dans $CONF}"
+USER_UID=$(id -u "$NUITPC_USER")
+BREW=/home/linuxbrew/.linuxbrew/bin/brew
+
+log() { echo "[$(date '+%F %T')] $*" | tee -a "$LOG"; }
+
+# Notification simple (sans attente), si une session est ouverte.
+notify() {
+    local bus="/run/user/$USER_UID/bus"
+    [ -S "$bus" ] || return 0
+    runuser -u "$NUITPC_USER" -- env DBUS_SESSION_BUS_ADDRESS="unix:path=$bus" \
+        notify-send -a "NuitPC" -i "$1" "$2" "$3" 2>/dev/null || true
+}
+
+# Rafraîchit la liste des firmwares et écrit ceux qui ont une mise à jour
+# dans $FW_STATUS (fichier vide = rien de disponible).
+check_firmware() {
+    install -d -m 755 "$(dirname "$FW_STATUS")"
+    fwupdmgr refresh --force >>"$LOG" 2>&1
+    fwupdmgr get-updates --json 2>>"$LOG" \
+        | jq -r '.Devices[]? | "\(.Name) : \(.Version) → \(.Releases[0].Version)"' \
+        > "$FW_STATUS.tmp" 2>>"$LOG"
+    mv "$FW_STATUS.tmp" "$FW_STATUS"
+    chmod 644 "$FW_STATUS"
+}
+
+# Prévient l'utilisateur s'il a une session ouverte.
+# Retourne 1 s'il a cliqué sur « Annuler », 0 sinon.
+warn() {
+    local title=$1 body=$2 bus="/run/user/$USER_UID/bus" answer
+    [ -S "$bus" ] || return 0
+    answer=$(runuser -u "$NUITPC_USER" -- env DBUS_SESSION_BUS_ADDRESS="unix:path=$bus" \
+        timeout "$WARN_SECONDS" notify-send -u critical -a "NuitPC" -i system-shutdown \
+        -A cancel="Annuler" -A now="Maintenant" "$title" "$body" 2>/dev/null)
+    [ "$answer" = "cancel" ] && return 1
+    return 0
+}
+
+do_update() {
+    log "=== Début des mises à jour ==="
+    log "--- Firmware (fwupd)"
+    check_firmware
+    if [ -s "$FW_STATUS" ]; then
+        log "Mises à jour de firmware disponibles :"; tee -a "$LOG" < "$FW_STATUS"
+        if [ "$FIRMWARE_UPDATE" = "yes" ]; then
+            fwupdmgr update -y --no-reboot-check --no-unreported-check 2>&1 | tee -a "$LOG"
+            check_firmware
+        else
+            log "Installation automatique désactivée : rien n'est installé."
+            notify software-update-available "Mise à jour de firmware disponible" \
+                "$(cat "$FW_STATUS")
+Installe-la toi-même avec : fwupdmgr update"
+        fi
+    else
+        log "Aucune mise à jour de firmware."
+    fi
+    if [ -x "$BREW" ]; then
+        log "--- brew"
+        runuser -l "$NUITPC_USER" -c "$BREW update && $BREW upgrade" 2>&1 | tee -a "$LOG"
+    fi
+    log "--- ujust update (uupd)"
+    /usr/libexec/uupd-update 2>&1 | tee -a "$LOG"
+    log "=== Mise à jour terminée ==="
+
+    if [ -e "$PENDING_POWEROFF" ]; then
+        rm -f "$PENDING_POWEROFF"
+        log "L'heure d'extinction est passée pendant la mise à jour : extinction."
+        systemctl poweroff
+        return
+    fi
+
+    if warn "Redémarrage dans 5 minutes" "Les mises à jour sont installées. Le PC va redémarrer."; then
+        log "Redémarrage."
+        systemctl reboot
+    else
+        log "Redémarrage annulé par l'utilisateur."
+    fi
+}
+
+do_poweroff() {
+    if systemctl is-active -q nuitpc-update.service; then
+        log "Mise à jour en cours : l'extinction aura lieu à la fin de celle-ci."
+        touch "$PENDING_POWEROFF"
+        return
+    fi
+    if warn "Extinction dans 5 minutes" "Extinction programmée du PC."; then
+        log "Extinction programmée."
+        systemctl poweroff
+    else
+        log "Extinction annulée par l'utilisateur."
+    fi
+}
+
+case "${1:-}" in
+    update)   do_update ;;
+    poweroff) do_poweroff ;;
+    check-firmware) check_firmware; cat "$FW_STATUS" ;;
+    *) echo "usage: $0 update|poweroff|check-firmware" >&2; exit 2 ;;
+esac

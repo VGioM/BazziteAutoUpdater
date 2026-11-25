@@ -1,0 +1,7 @@
+[Desktop Entry]
+Type=Application
+Name=NuitPC (notification firmware)
+Comment=Signale à l'ouverture de session une mise à jour de firmware disponible
+Exec=python3 %h/.local/bin/nuitpc --notify
+NoDisplay=true
+X-KDE-autostart-after=panel
