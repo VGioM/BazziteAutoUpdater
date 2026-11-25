@@ -1,16 +1,16 @@
 #!/usr/bin/bash
-# NuitPC — assistant privilégié appelé par l'interface via pkexec.
-#   nuitpc-helper set update   HH:MM|off
-#   nuitpc-helper set poweroff HH:MM|off
-#   nuitpc-helper run update|poweroff     (lancer maintenant)
-#   nuitpc-helper firmware-auto yes|no    (installer les firmwares la nuit)
-#   nuitpc-helper check-firmware          (revérifier les firmwares disponibles)
-#   nuitpc-helper set boot HH:MM|off      (démarrage automatique)
-#   nuitpc-helper test-wake               (éteindre et rallumer dans 3 min)
+# BazziteAutoUpdater — assistant privilégié appelé par l'interface via pkexec.
+#   bazzite-autoupdater-helper set update   HH:MM|off
+#   bazzite-autoupdater-helper set poweroff HH:MM|off
+#   bazzite-autoupdater-helper run update|poweroff     (lancer maintenant)
+#   bazzite-autoupdater-helper firmware-auto yes|no    (installer les firmwares la nuit)
+#   bazzite-autoupdater-helper check-firmware          (revérifier les firmwares disponibles)
+#   bazzite-autoupdater-helper set boot HH:MM|off      (démarrage automatique)
+#   bazzite-autoupdater-helper test-wake               (éteindre et rallumer dans 3 min)
 set -eu
 
-CONF=/etc/nuitpc/nuitpc.conf
-die() { echo "nuitpc-helper: $*" >&2; exit 2; }
+CONF=/etc/bazzite-autoupdater/bazzite-autoupdater.conf
+die() { echo "bazzite-autoupdater-helper: $*" >&2; exit 2; }
 
 case "${1:-}" in
 firmware-auto)
@@ -22,9 +22,9 @@ firmware-auto)
     fi
     exit 0 ;;
 check-firmware)
-    exec /usr/local/bin/nuitpc-job check-firmware ;;
+    exec /usr/local/bin/bazzite-autoupdater-job check-firmware ;;
 test-wake)
-    exec /usr/local/bin/nuitpc-job test-wake ;;
+    exec /usr/local/bin/bazzite-autoupdater-job test-wake ;;
 set)
     if [ "${2:-}" = "boot" ]; then
         value=${3:-}
@@ -41,13 +41,13 @@ esac
 
 job=${2:-}
 [[ "$job" == "update" || "$job" == "poweroff" ]] || die "tâche invalide"
-timer="/etc/systemd/system/nuitpc-$job.timer"
+timer="/etc/systemd/system/bazzite-autoupdater-$job.timer"
 
 case "${1:-}" in
 set)
     value=${3:-}
     if [ "$value" = "off" ]; then
-        systemctl disable --now "nuitpc-$job.timer" 2>/dev/null || true
+        systemctl disable --now "bazzite-autoupdater-$job.timer" 2>/dev/null || true
         rm -f "$timer"
         systemctl daemon-reload
         exit 0
@@ -57,7 +57,7 @@ set)
     [ "$job" = "update" ] && wake=true
     cat > "$timer" <<EOF
 [Unit]
-Description=NuitPC - $job programmé à $value
+Description=BazziteAutoUpdater - $job programmé à $value
 
 [Timer]
 OnCalendar=*-*-* $value:00
@@ -69,11 +69,11 @@ Persistent=false
 WantedBy=timers.target
 EOF
     systemctl daemon-reload
-    systemctl enable "nuitpc-$job.timer" >/dev/null 2>&1
-    systemctl restart "nuitpc-$job.timer"
+    systemctl enable "bazzite-autoupdater-$job.timer" >/dev/null 2>&1
+    systemctl restart "bazzite-autoupdater-$job.timer"
     ;;
 run)
-    systemctl start --no-block "nuitpc-$job.service"
+    systemctl start --no-block "bazzite-autoupdater-$job.service"
     ;;
 *)
     die "commande invalide"

@@ -1,5 +1,5 @@
 #!/usr/bin/python3
-"""NuitPC — programme la mise à jour + redémarrage et l'extinction du PC (Bazzite)."""
+"""BazziteAutoUpdater — programme la mise à jour + redémarrage et l'extinction du PC (Bazzite)."""
 import json
 import os
 import re
@@ -8,12 +8,12 @@ import sys
 import threading
 import time
 
-HELPER = "/usr/local/bin/nuitpc-helper"
-CONF = "/etc/nuitpc/nuitpc.conf"
-LOG = "/var/log/nuitpc.log"
-FW_STATUS = "/var/lib/nuitpc/firmware-disponible.txt"
+HELPER = "/usr/local/bin/bazzite-autoupdater-helper"
+CONF = "/etc/bazzite-autoupdater/bazzite-autoupdater.conf"
+LOG = "/var/log/bazzite-autoupdater.log"
+FW_STATUS = "/var/lib/bazzite-autoupdater/firmware-disponible.txt"
 SETTINGS = os.path.join(os.environ.get("XDG_CONFIG_HOME", os.path.expanduser("~/.config")),
-                        "nuitpc", "settings.json")
+                        "bazzite-autoupdater", "settings.json")
 
 JOBS = {
     "boot": ("Démarrage automatique",
@@ -40,7 +40,7 @@ def notify_mode():
     """Appelé au démarrage de session : signale un firmware disponible."""
     fw = read_firmware_status()
     if fw:
-        subprocess.run(["notify-send", "-a", "NuitPC", "-i", "software-update-available",
+        subprocess.run(["notify-send", "-a", "BazziteAutoUpdater", "-i", "software-update-available",
                         "Mise à jour de firmware disponible",
                         "\n".join(fw) + "\nInstalle-la toi-même avec : fwupdmgr update"])
     sys.exit(0)
@@ -90,7 +90,7 @@ def read_timer(job):
         m = re.fullmatch(r"(\d{2}):(\d{2})", read_conf("BOOT_TIME"))
         return (int(m.group(1)), int(m.group(2))) if m else None
     try:
-        with open(f"/etc/systemd/system/nuitpc-{job}.timer") as f:
+        with open(f"/etc/systemd/system/bazzite-autoupdater-{job}.timer") as f:
             m = re.search(r"OnCalendar=\S+ (\d{2}):(\d{2})", f.read())
             return (int(m.group(1)), int(m.group(2))) if m else None
     except OSError:
@@ -98,6 +98,7 @@ def read_timer(job):
 
 
 def next_run(job):
+    """Prochaine exécution, au format local « jeu. 26/11 00:00 »."""
     if job == "boot":
         h, m = read_timer(job)
         now = time.localtime()
@@ -106,9 +107,12 @@ def next_run(job):
             t += 86400
         return time.strftime("%a %d/%m %H:%M", time.localtime(t)) + " (si le PC est éteint)"
     out = subprocess.run(
-        ["systemctl", "show", f"nuitpc-{job}.timer", "-p", "NextElapseUSecRealtime", "--value"],
+        ["systemctl", "show", f"bazzite-autoupdater-{job}.timer", "-p", "NextElapseUSecRealtime",
+         "--value", "--timestamp=unix"],
         capture_output=True, text=True).stdout.strip()
-    return out or None
+    if not out.startswith("@"):
+        return None
+    return time.strftime("%a %d/%m %H:%M", time.localtime(int(out[1:])))
 
 
 def helper(*args):
@@ -197,7 +201,7 @@ class JobRow:
 
 class App(Adw.Application):
     def __init__(self):
-        super().__init__(application_id="local.nuitpc")
+        super().__init__(application_id="io.github.VGioM.BazziteAutoUpdater")
         self.settings = load_settings()
 
     def do_startup(self):
@@ -205,7 +209,7 @@ class App(Adw.Application):
         apply_theme(self.settings.get("theme", 0))
 
     def do_activate(self):
-        win = Adw.ApplicationWindow(application=self, title="NuitPC",
+        win = Adw.ApplicationWindow(application=self, title="BazziteAutoUpdater",
                                     default_width=480, default_height=680)
         self.toasts = Adw.ToastOverlay()
         tv = Adw.ToolbarView()
@@ -229,7 +233,7 @@ class App(Adw.Application):
         page.add(fw)
         self.fw_auto = Adw.SwitchRow(
             title="Installer automatiquement la nuit",
-            subtitle="Désactivé : NuitPC vérifie seulement et te prévient.")
+            subtitle="Désactivé : BazziteAutoUpdater vérifie seulement et te prévient.")
         self.fw_auto.set_active(read_conf("FIRMWARE_UPDATE", "no") == "yes")
         fw.add(self.fw_auto)
 
@@ -342,5 +346,5 @@ class App(Adw.Application):
 
 
 if not os.path.exists(HELPER):
-    sys.exit("NuitPC n'est pas installé (lance install.sh).")
+    sys.exit("BazziteAutoUpdater n'est pas installé (lance install.sh).")
 App().run([sys.argv[0]])

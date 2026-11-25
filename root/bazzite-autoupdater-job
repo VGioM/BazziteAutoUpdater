@@ -1,24 +1,24 @@
 #!/usr/bin/bash
-# NuitPC — tâches nocturnes (exécuté en root par systemd)
-#   nuitpc-job update    : mises à jour (firmware, brew, uupd) puis redémarrage
-#   nuitpc-job poweroff  : extinction
-#   nuitpc-job check-firmware : liste les mises à jour de firmware disponibles
-#   nuitpc-job set-wake  : programme le démarrage automatique (à l'extinction)
-#   nuitpc-job test-wake : éteint et rallume le PC 3 minutes plus tard
+# BazziteAutoUpdater — tâches nocturnes (exécuté en root par systemd)
+#   bazzite-autoupdater-job update    : mises à jour (firmware, brew, uupd) puis redémarrage
+#   bazzite-autoupdater-job poweroff  : extinction
+#   bazzite-autoupdater-job check-firmware : liste les mises à jour de firmware disponibles
+#   bazzite-autoupdater-job set-wake  : programme le démarrage automatique (à l'extinction)
+#   bazzite-autoupdater-job test-wake : éteint et rallume le PC 3 minutes plus tard
 set -u
 
-CONF=/etc/nuitpc/nuitpc.conf
-LOG=/var/log/nuitpc.log
-PENDING_POWEROFF=/run/nuitpc-poweroff-pending
-FW_STATUS=/var/lib/nuitpc/firmware-disponible.txt
-WAKE_OVERRIDE=/run/nuitpc-wake-override
+CONF=/etc/bazzite-autoupdater/bazzite-autoupdater.conf
+LOG=/var/log/bazzite-autoupdater.log
+PENDING_POWEROFF=/run/bazzite-autoupdater-poweroff-pending
+FW_STATUS=/var/lib/bazzite-autoupdater/firmware-disponible.txt
+WAKE_OVERRIDE=/run/bazzite-autoupdater-wake-override
 WARN_SECONDS=300
 FIRMWARE_UPDATE=no
 
 # shellcheck source=/dev/null
 [ -r "$CONF" ] && . "$CONF"
-: "${NUITPC_USER:?NUITPC_USER manquant dans $CONF}"
-USER_UID=$(id -u "$NUITPC_USER")
+: "${AUTOUPDATER_USER:?AUTOUPDATER_USER manquant dans $CONF}"
+USER_UID=$(id -u "$AUTOUPDATER_USER")
 BREW=/home/linuxbrew/.linuxbrew/bin/brew
 
 log() { echo "[$(date '+%F %T')] $*" | tee -a "$LOG"; }
@@ -27,8 +27,8 @@ log() { echo "[$(date '+%F %T')] $*" | tee -a "$LOG"; }
 notify() {
     local bus="/run/user/$USER_UID/bus"
     [ -S "$bus" ] || return 0
-    runuser -u "$NUITPC_USER" -- env DBUS_SESSION_BUS_ADDRESS="unix:path=$bus" \
-        notify-send -a "NuitPC" -i "$1" "$2" "$3" 2>/dev/null || true
+    runuser -u "$AUTOUPDATER_USER" -- env DBUS_SESSION_BUS_ADDRESS="unix:path=$bus" \
+        notify-send -a "BazziteAutoUpdater" -i "$1" "$2" "$3" 2>/dev/null || true
 }
 
 # Rafraîchit la liste des firmwares et écrit ceux qui ont une mise à jour
@@ -48,8 +48,8 @@ check_firmware() {
 warn() {
     local title=$1 body=$2 bus="/run/user/$USER_UID/bus" answer
     [ -S "$bus" ] || return 0
-    answer=$(runuser -u "$NUITPC_USER" -- env DBUS_SESSION_BUS_ADDRESS="unix:path=$bus" \
-        timeout "$WARN_SECONDS" notify-send -u critical -a "NuitPC" -i system-shutdown \
+    answer=$(runuser -u "$AUTOUPDATER_USER" -- env DBUS_SESSION_BUS_ADDRESS="unix:path=$bus" \
+        timeout "$WARN_SECONDS" notify-send -u critical -a "BazziteAutoUpdater" -i system-shutdown \
         -A cancel="Annuler" -A now="Maintenant" "$title" "$body" 2>/dev/null)
     [ "$answer" = "cancel" ] && return 1
     return 0
@@ -75,7 +75,7 @@ Installe-la toi-même avec : fwupdmgr update"
     fi
     if [ -x "$BREW" ]; then
         log "--- brew"
-        runuser -l "$NUITPC_USER" -c "$BREW update && $BREW upgrade" 2>&1 | tee -a "$LOG"
+        runuser -l "$AUTOUPDATER_USER" -c "$BREW update && $BREW upgrade" 2>&1 | tee -a "$LOG"
     fi
     log "--- ujust update (uupd)"
     /usr/libexec/uupd-update 2>&1 | tee -a "$LOG"
@@ -96,7 +96,7 @@ Installe-la toi-même avec : fwupdmgr update"
     fi
 }
 
-# Appelé à chaque extinction (ExecStop de nuitpc-wake.service) :
+# Appelé à chaque extinction (ExecStop de bazzite-autoupdater-wake.service) :
 # programme l'horloge de la carte mère pour rallumer le PC à BOOT_TIME.
 set_wake() {
     local t now
@@ -123,7 +123,7 @@ test_wake() {
 }
 
 do_poweroff() {
-    if systemctl is-active -q nuitpc-update.service; then
+    if systemctl is-active -q bazzite-autoupdater-update.service; then
         log "Mise à jour en cours : l'extinction aura lieu à la fin de celle-ci."
         touch "$PENDING_POWEROFF"
         return

@@ -1,0 +1,6 @@
+[Unit]
+Description=BazziteAutoUpdater - extinction programmée
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/bazzite-autoupdater-job poweroff

@@ -1,8 +1,8 @@
 [Desktop Entry]
 Type=Application
-Name=NuitPC
+Name=BazziteAutoUpdater
 Comment=Mise à jour, redémarrage et extinction programmés
-Exec=python3 %h/.local/bin/nuitpc
+Exec=python3 %h/.local/bin/bazzite-autoupdater
 Icon=preferences-system-time
 Categories=System;Settings;
 Terminal=false

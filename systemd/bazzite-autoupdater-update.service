@@ -1,10 +1,10 @@
 [Unit]
-Description=NuitPC - mises à jour puis redémarrage
+Description=BazziteAutoUpdater - mises à jour puis redémarrage
 Wants=network-online.target
 After=network-online.target
 
 [Service]
 Type=oneshot
-ExecStart=/usr/local/bin/nuitpc-job update
+ExecStart=/usr/local/bin/bazzite-autoupdater-job update
 TimeoutStartSec=4h
 SELinuxContext=system_u:unconfined_r:unconfined_t:s0

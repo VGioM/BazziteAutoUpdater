@@ -1,0 +1,9 @@
+// BazziteAutoUpdater : l'interface peut régler ses minuteurs sans mot de passe
+// (uniquement via /usr/local/bin/bazzite-autoupdater-helper, qui valide ses arguments).
+polkit.addRule(function(action, subject) {
+    if (action.id == "org.freedesktop.policykit.exec" &&
+        action.lookup("program") == "/usr/local/bin/bazzite-autoupdater-helper" &&
+        subject.isInGroup("wheel") && subject.active && subject.local) {
+        return polkit.Result.YES;
+    }
+});
