@@ -206,6 +206,17 @@ class App(Adw.Application):
         self.fw_btn.connect("clicked", self.check_firmware)
         self.fw_row.add_suffix(self.fw_btn)
         fw.add(self.fw_row)
+
+        self.fw_install = Adw.ActionRow(
+            title="Installer maintenant",
+            subtitle="Ouvre un terminal : fwupdmgr te demande confirmation pour chaque "
+                     "appareil. Ne coupe pas le PC pendant l'installation.")
+        self.fw_install.set_subtitle_lines(0)
+        btn = Gtk.Button(label="Installer…", valign=Gtk.Align.CENTER)
+        btn.add_css_class("destructive-action")
+        btn.connect("clicked", self.install_firmware)
+        self.fw_install.add_suffix(btn)
+        fw.add(self.fw_install)
         self.show_firmware()
 
         # --- Apparence
@@ -244,8 +255,23 @@ class App(Adw.Application):
         save_settings(self.settings)
         apply_theme(self.settings["theme"])
 
+    def install_firmware(self, _btn):
+        # Interactif volontairement : l'utilisateur valide chaque mise à jour.
+        script = ("fwupdmgr update; echo; "
+                  "echo 'Terminé. Si un redémarrage est demandé, il installera le firmware.'; "
+                  "read -rp 'Appuie sur Entrée pour fermer…'")
+        proc = subprocess.Popen(["konsole", "-e", "bash", "-c", script])
+
+        def wait():
+            proc.wait()
+            ok, _ = helper("check-firmware")
+            GLib.idle_add(self.show_firmware)
+
+        threading.Thread(target=wait, daemon=True).start()
+
     def show_firmware(self):
         fw = read_firmware_status()
+        self.fw_install.set_visible(bool(fw))
         if fw is None:
             self.fw_row.set_subtitle("Pas encore vérifié")
         elif not fw:

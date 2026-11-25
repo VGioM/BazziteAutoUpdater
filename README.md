@@ -16,7 +16,7 @@ Exemple : mises à jour à 00h00 → redémarrage → le PC tourne (Steam peut r
 - Si l'heure d'extinction arrive pendant une mise à jour, le PC s'éteint à la fin de celle-ci au lieu de redémarrer.
 - Le PC est **sorti de veille** pour la mise à jour si besoin (`WakeSystem`).
 - **Firmware (BIOS, SSD…) :** NuitPC vérifie chaque nuit s'il existe des mises à jour (via `fwupd`).
-  - Option désactivée (par défaut) : rien n'est installé, tu es prévenu par une notification, au démarrage de session et dans l'application. Tu installes toi-même avec `fwupdmgr update`.
+  - Option désactivée (par défaut) : rien n'est installé, tu es prévenu par une notification, au démarrage de session et dans l'application. Tu installes toi-même avec le bouton **Installer…** de l'application (ouvre un terminal où `fwupdmgr update` demande confirmation) ou directement avec `fwupdmgr update`.
   - Option activée : les firmwares sont installés automatiquement.
 
   ⚠️ Une coupure de courant pendant la mise à jour d'un BIOS peut l'endommager, et une mise à jour de BIOS remet souvent ses réglages par défaut (XMP/EXPO, ordre de démarrage, Secure Boot…).
