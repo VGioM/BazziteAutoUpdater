@@ -66,3 +66,7 @@ Commandes utiles :
 systemctl list-timers 'nuitpc-*'   # prochaines exécutions
 tail -f /var/log/nuitpc.log         # suivre le journal
 ```
+
+## Licence
+
+MIT — voir [LICENSE](LICENSE).
